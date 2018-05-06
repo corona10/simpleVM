@@ -1,4 +1,4 @@
-package simpleVM
+package simplevm
 
 type InstKind int
 
@@ -12,6 +12,8 @@ const (
 	IADD
 	ISUB
 	IMUL
+	IDIV
+	IMOD
 	ILT
 	IEQ
 	BR
