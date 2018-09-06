@@ -32,10 +32,10 @@ const (
 )
 
 // NewInstruction is a function for creating the Instruction
-func NewInstruction(raw_inst int) Instruction {
+func NewInstruction(raw_inst int) *Instruction {
 	k := InstKind(raw_inst)
 	inst := Instruction{kind: k}
-	return inst
+	return &inst
 }
 
 // GetKind is a method for getting a kind of instruction.

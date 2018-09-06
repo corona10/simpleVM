@@ -22,7 +22,7 @@ func (m *FunctionMetaData) GetNLocals() int {
 	return m.nlocals
 }
 
-// GetAddress is a method for get a address of funtion.
+// GetAddress is a method for get a address of function.
 func (m *FunctionMetaData) GetAddress() int {
 	return m.address
 }

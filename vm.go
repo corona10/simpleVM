@@ -7,27 +7,30 @@ import (
 )
 
 type VM struct {
-	isRunning bool
-	program   []int
-	stack     []int
-	locals    []int
-	globals   []int
-	pc        int // program counter
-	sp        int // stack pointer
-	fp        int // frame pointer
-	logger    *log.Logger
+	isRunning  bool
+	program    []int
+	stack      []int
+	locals     []int
+	globals    []int
+	fCallstack []*Context
+	pc         int // program counter
+	callsp     int
+	sp         int // stack pointer
+	fp         int // frame pointer
+	logger     *log.Logger
 }
 
 const (
-	DEFAULT_STACK_SIZE = 1000
-	TRUE               = 1
-	FALSE              = 0
+	DEFAULT_CALL_STACK_SIZE = 1000
+	DEFAULT_STACK_SIZE      = 1000
+	TRUE                    = 1
+	FALSE                   = 0
 )
 
-// CreateNewVM is a funtion for create a new virtual machine.
+// CreateNewVM is a function for create a new virtual machine.
 func CreateNewVM() *VM {
 	return &VM{isRunning: false, program: nil,
-		pc: 0, sp: -1, fp: -1, logger: log.New(os.Stdout, "simpleVM: ", log.LstdFlags)}
+		pc: 0, sp: -1, fp: -1, callsp: -1, logger: log.New(os.Stdout, "simpleVM: ", log.LstdFlags)}
 }
 
 // LoadProgram is a method to load a program
@@ -36,6 +39,7 @@ func (vm *VM) LoadProgram(program []int, startPc int, nGlobals int) {
 	vm.program = program
 	vm.pc = startPc
 	vm.stack = make([]int, DEFAULT_STACK_SIZE)
+	vm.fCallstack = make([]*Context, DEFAULT_CALL_STACK_SIZE)
 	vm.globals = make([]int, nGlobals)
 }
 
@@ -52,18 +56,18 @@ func (vm *VM) Run() {
 	vm.logger.Println("End of the program for the VM.")
 }
 
-func (vm *VM) decode(rawInst int) Instruction {
+func (vm *VM) decode(rawInst int) *Instruction {
 	inst := NewInstruction(rawInst)
 	return inst
 }
 
-func (vm *VM) execute(inst Instruction) {
+func (vm *VM) execute(inst *Instruction) {
 	switch in := inst.GetKind(); in {
 	case BR:
 		vm.pc = vm.program[vm.pc]
-		vm.pc++
 	case BRT:
 		addr := vm.program[vm.pc]
+		vm.pc++
 		if vm.stack[vm.sp] == TRUE {
 			vm.pc = addr
 		}
@@ -79,33 +83,22 @@ func (vm *VM) execute(inst Instruction) {
 		address := vm.program[vm.pc] // Get address function
 		vm.pc++
 		nargs := vm.program[vm.pc] // Get number of arguments
-		vm.sp++
-		vm.stack[vm.sp] = nargs // Store number of arguments
-		vm.sp++
-		vm.stack[vm.sp] = vm.fp // Store frame pointer
-		vm.sp++
-		vm.stack[vm.sp] = vm.pc // Store return address
-		vm.fp = vm.sp
+		vm.pc++
+		vm.callsp++
+		vm.fCallstack[vm.callsp] = NewContext(vm.pc, nargs)
+		firstarg := vm.sp - nargs + 1
+		for i := 0; i < nargs; i++ {
+			vm.fCallstack[vm.callsp].locals[i] = vm.stack[firstarg+i]
+		}
+		vm.sp -= nargs
 		vm.pc = address
 	case RET:
-		value := vm.stack[vm.sp]
-		vm.sp--
-		vm.sp = vm.fp
-		vm.pc = vm.stack[vm.sp]
-		vm.sp--
-		vm.fp = vm.stack[vm.sp]
-		vm.sp--
-		nargs := vm.stack[vm.sp]
-		vm.sp--
-		vm.sp -= nargs
-		vm.sp++
-		vm.stack[vm.sp] = value
-		vm.pc++
+		vm.pc = vm.fCallstack[vm.callsp].GetReturnPC()
+		vm.callsp--
 	case IADD:
 		b := vm.stack[vm.sp]
 		vm.sp--
 		a := vm.stack[vm.sp]
-		vm.sp++
 		vm.stack[vm.sp] = a + b
 	case ICONST:
 		vm.sp++
@@ -115,25 +108,21 @@ func (vm *VM) execute(inst Instruction) {
 		b := vm.stack[vm.sp]
 		vm.sp--
 		a := vm.stack[vm.sp]
-		vm.sp++
 		vm.stack[vm.sp] = a * b
 	case IDIV:
 		b := vm.stack[vm.sp]
 		vm.sp--
 		a := vm.stack[vm.sp]
-		vm.sp++
 		vm.stack[vm.sp] = a / b
 	case IMOD:
 		b := vm.stack[vm.sp]
 		vm.sp--
 		a := vm.stack[vm.sp]
-		vm.sp++
 		vm.stack[vm.sp] = a % b
 	case ILT:
 		b := vm.stack[vm.sp]
 		vm.sp--
 		a := vm.stack[vm.sp]
-		vm.sp++
 		if a < b {
 			vm.stack[vm.sp] = TRUE
 		} else {
@@ -145,14 +134,14 @@ func (vm *VM) execute(inst Instruction) {
 	case POP:
 		vm.sp--
 	case LOAD:
-		offset := vm.program[vm.pc]
+		regnum := vm.program[vm.pc]
 		vm.pc++
 		vm.sp++
-		vm.stack[vm.sp] = vm.stack[vm.fp+offset]
+		vm.stack[vm.sp] = vm.fCallstack[vm.callsp].locals[regnum]
 	case STORE:
-		offset := vm.program[vm.pc]
+		regnum := vm.program[vm.pc]
 		vm.pc++
-		vm.stack[vm.fp+offset] = vm.stack[vm.sp]
+		vm.fCallstack[vm.callsp].locals[regnum] = vm.stack[vm.sp]
 		vm.sp--
 	case GLOAD:
 		address := vm.program[vm.pc]
@@ -168,7 +157,6 @@ func (vm *VM) execute(inst Instruction) {
 		b := vm.stack[vm.sp]
 		vm.sp--
 		a := vm.stack[vm.sp]
-		vm.sp++
 		vm.stack[vm.sp] = a - b
 	case HALT:
 		vm.logger.Printf("Got HALT instruction from pc[%v]\n", vm.pc)
